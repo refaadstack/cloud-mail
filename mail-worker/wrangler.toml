@@ -1,5 +1,6 @@
 name = "cloud-mail"
 main = "src/index.js"
+# akadnya.com deployment trigger
 compatibility_date = "2025-06-04"
 keep_vars = true
 
