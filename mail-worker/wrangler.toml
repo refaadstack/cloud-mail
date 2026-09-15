@@ -51,6 +51,8 @@ custom_domain = true
 #orm_log = false			#是否sql日志
 domain = ["refaadstack.com", "akadnya.com"]
 admin = "admin@refaadstack.com"
+# Per-domain admins: JSON map domain -> admin email (akadnya admin sees/manages akadnya.com only)
+admins = '{"akadnya.com":"admin@akadnya.com"}'
 jwt_secret = "cm-secret-9f2b8a1e4c7d6f3a"
 
 [build]

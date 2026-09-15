@@ -22,6 +22,7 @@ import domainUtils from '../utils/domain-uitls';
 import account from "../entity/account";
 import { att } from '../entity/att';
 import telegramService from './telegram-service';
+import adminUtils from '../utils/admin-utils';
 
 const emailService = {
 
@@ -782,7 +783,7 @@ const emailService = {
 		return result;
 	},
 
-	async allList(c, params) {
+	async allList(c, params, callerUserId) {
 
 		let { emailId, size, name, subject, accountEmail, userEmail, type, timeSort } = params;
 
@@ -806,6 +807,19 @@ const emailService = {
 		}
 
 		const conditions = [];
+
+		// Per-domain admins only see mail of users in their own domain(s).
+		if (callerUserId) {
+			const callerRow = await userService.selectByIdIncludeDel(c, callerUserId);
+			if (callerRow && !adminUtils.isSuperAdmin(c.env, callerRow.email)) {
+				const domains = adminUtils.adminDomains(c.env, callerRow.email);
+				if (domains.length > 0) {
+					conditions.push(or(...domains.map(domain => sql`${user.email} COLLATE NOCASE LIKE ${'%@' + domain}`)));
+				} else {
+					conditions.push(sql`${user.email} COLLATE NOCASE LIKE ${callerRow.email}`);
+				}
+			}
+		}
 
 		if (type === 'send') {
 			conditions.push(eq(email.type, emailConst.type.SEND));
@@ -894,17 +908,35 @@ const emailService = {
 		return { list: list, total: totalRow.total, latestEmail };
 	},
 
-	async allEmailLatest(c, params) {
+	async allEmailLatest(c, params, callerUserId) {
 
-		const { emailId } = params;
+		let { emailId } = params;
+		emailId = Number(emailId) || 0;
+
+		const latestConditions = [
+			gt(email.emailId, emailId),
+			eq(email.type, emailConst.type.RECEIVE),
+			ne(email.status, emailConst.status.SAVING)
+		];
+
+		// Per-domain admins only see mail of users in their own domain(s).
+		if (callerUserId) {
+			const callerRow = await userService.selectByIdIncludeDel(c, callerUserId);
+			if (callerRow && !adminUtils.isSuperAdmin(c.env, callerRow.email)) {
+				const domains = adminUtils.adminDomains(c.env, callerRow.email);
+				if (domains.length > 0) {
+					latestConditions.push(or(...domains.map(domain => sql`${user.email} COLLATE NOCASE LIKE ${'%@' + domain}`)));
+				} else {
+					latestConditions.push(sql`${user.email} COLLATE NOCASE LIKE ${callerRow.email}`);
+				}
+			}
+		}
 
 		let list = await orm(c).select({...email, userEmail: user.email}).from(email)
 			.leftJoin(user, eq(email.userId, user.userId))
 			.where(
 				and(
-					gt(email.emailId, emailId),
-					eq(email.type, emailConst.type.RECEIVE),
-					ne(email.status, emailConst.status.SAVING)
+					...latestConditions
 				))
 			.orderBy(desc(email.emailId))
 			.limit(20);

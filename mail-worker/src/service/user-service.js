@@ -2,7 +2,7 @@ import BizError from '../error/biz-error';
 import accountService from './account-service';
 import orm from '../entity/orm';
 import user from '../entity/user';
-import { and, asc, count, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray, or, sql } from 'drizzle-orm';
 import { emailConst, isDel, roleConst, settingConst, userConst } from '../const/entity-const';
 import kvConst from '../const/kv-const';
 import KvConst from '../const/kv-const';
@@ -20,6 +20,7 @@ import {oauth} from "../entity/oauth";
 import oauthService from "./oauth-service";
 import settingService from './setting-service';
 import starService from './star-service';
+import adminUtils from '../utils/admin-utils';
 
 const userService = {
 
@@ -107,16 +108,19 @@ const userService = {
 		await c.env.kv.delete(kvConst.AUTH_INFO + userId)
 	},
 
-	async physicsDelete(c, params) {
+	async physicsDelete(c, params, callerUserId) {
 		let { userIds } = params;
 		userIds = userIds.split(',').map(Number);
+		if (callerUserId) {
+			await this.assertManageableIds(c, callerUserId, userIds);
+		}
 		await starService.removeByUserIds(c, userIds);
 		await accountService.physicsDeleteByUserIds(c, userIds);
 		await oauthService.deleteByUserIds(c, userIds);
 		await orm(c).delete(user).where(inArray(user.userId, userIds)).run();
 	},
 
-	async list(c, params) {
+	async list(c, params, callerUserId) {
 
 		let { num, size, email, timeSort, status } = params;
 
@@ -131,6 +135,20 @@ const userService = {
 		num = (num - 1) * size;
 
 		const conditions = [];
+
+		// Per-domain admins only see users of their own domain(s).
+		// Non-admin callers without admin domains only see themselves.
+		if (callerUserId) {
+			const callerRow = await userService.selectByIdIncludeDel(c, callerUserId);
+			if (callerRow && !adminUtils.isSuperAdmin(c.env, callerRow.email)) {
+				const domains = adminUtils.adminDomains(c.env, callerRow.email);
+				if (domains.length > 0) {
+					conditions.push(or(...domains.map(domain => sql`${user.email} COLLATE NOCASE LIKE ${'%@' + domain}`)));
+				} else {
+					conditions.push(sql`${user.email} COLLATE NOCASE LIKE ${callerRow.email}`);
+				}
+			}
+		}
 
 		if (status > -1) {
 			conditions.push(eq(user.status, status));
@@ -255,16 +273,42 @@ const userService = {
 			.run();
 	},
 
-	async setPwd(c, params) {
+	// Domain guard for admin mutations. Internal/system calls pass
+	// callerUserId = null/undefined and skip the check.
+	async assertManageable(c, callerUserId, targetUserId) {
+		if (!callerUserId) return;
+		const [callerRow, targetRow] = await Promise.all([
+			userService.selectByIdIncludeDel(c, callerUserId),
+			userService.selectByIdIncludeDel(c, targetUserId),
+		]);
+		adminUtils.assertCanManage(c.env, callerRow && callerRow.email, targetRow && targetRow.email);
+	},
+
+	async assertManageableIds(c, callerUserId, targetUserIds) {
+		if (!callerUserId) return;
+		const callerRow = await userService.selectByIdIncludeDel(c, callerUserId);
+		if (adminUtils.isSuperAdmin(c.env, callerRow && callerRow.email)) return;
+		const targets = await orm(c).select({ email: user.email }).from(user)
+			.where(inArray(user.userId, targetUserIds)).all();
+		for (const targetRow of targets) {
+			adminUtils.assertCanManage(c.env, callerRow && callerRow.email, targetRow.email);
+		}
+	},
+
+	async setPwd(c, params, callerUserId) {
 
 		const { password, userId } = params;
+
+		await this.assertManageable(c, callerUserId, userId);
 		await this.resetPassword(c, { password }, userId);
 		await c.env.kv.delete(KvConst.AUTH_INFO + userId);
 	},
 
-	async setStatus(c, params) {
+	async setStatus(c, params, callerUserId) {
 
 		const { status, userId } = params;
+
+		await this.assertManageable(c, callerUserId, userId);
 
 		await orm(c)
 			.update(user)
@@ -277,9 +321,11 @@ const userService = {
 		}
 	},
 
-	async setType(c, params) {
+	async setType(c, params, callerUserId) {
 
 		const { type, userId } = params;
+
+		await this.assertManageable(c, callerUserId, userId);
 
 		const roleRow = await roleService.selectById(c, type);
 
@@ -311,9 +357,14 @@ const userService = {
 			.run();
 	},
 
-	async add(c, params) {
+	async add(c, params, callerUserId) {
 
 		const { email, type, password } = params;
+
+		if (callerUserId) {
+			const callerRow = await userService.selectByIdIncludeDel(c, callerUserId);
+			adminUtils.assertCanManage(c.env, callerRow && callerRow.email, email);
+		}
 
 		if (!c.env.domain.includes(emailUtils.getDomain(email))) {
 			throw new BizError(t('notEmailDomain'));
@@ -354,12 +405,16 @@ const userService = {
 		await orm(c).update(user).set({ sendCount: 0 }).where(inArray(user.type, roleIds)).run();
 	},
 
-	async resetSendCount(c, params) {
+	async resetSendCount(c, params, callerUserId) {
+
+		await this.assertManageable(c, callerUserId, params.userId);
 		await orm(c).update(user).set({ sendCount: 0 }).where(eq(user.userId, params.userId)).run();
 	},
 
-	async restore(c, params) {
+	async restore(c, params, callerUserId) {
 		const { userId, type } = params
+
+		await this.assertManageable(c, callerUserId, userId);
 		await orm(c)
 			.update(user)
 			.set({ isDel: isDel.NORMAL })

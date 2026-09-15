@@ -14,6 +14,7 @@ import { isDel, roleConst } from '../const/entity-const';
 import email from '../entity/email';
 import userService from './user-service';
 import KvConst from '../const/kv-const';
+import adminUtils from '../utils/admin-utils';
 
 const publicService = {
 
@@ -177,7 +178,7 @@ const publicService = {
 
 		const userRow = await userService.selectByEmailIncludeDel(c, email);
 
-		if (email !== c.env.admin) {
+		if (!adminUtils.isAdmin(c.env, email)) {
 			throw new BizError(t('notAdmin'));
 		}
 

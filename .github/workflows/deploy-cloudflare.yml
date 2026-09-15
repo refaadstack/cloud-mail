@@ -19,6 +19,7 @@ jobs:
       CUSTOM_DOMAIN_AKADNYA: ${{ secrets.CUSTOM_DOMAIN_AKADNYA || vars.CUSTOM_DOMAIN_AKADNYA || 'mail.akadnya.com' }}
       DOMAIN: ${{ secrets.DOMAIN || vars.DOMAIN || '["refaadstack.com","akadnya.com"]' }}
       ADMIN: ${{ secrets.ADMIN || vars.ADMIN }}
+      ADMINS: ${{ secrets.ADMINS || vars.ADMINS || '{}' }}
       JWT_SECRET: ${{ secrets.JWT_SECRET || vars.JWT_SECRET }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN || vars.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
@@ -76,6 +77,11 @@ jobs:
           
           if ! jq -e 'type == "array"' <<< "$DOMAIN" ; then
             echo "❌ DOMAIN variable must be a JSON array (e.g., [\"example.com\"])."
+            exit 1
+          fi
+          
+          if ! jq -e 'type == "object"' <<< "$ADMINS" ; then
+            echo "❌ ADMINS variable must be a JSON object (e.g., {\"example.com\":\"admin@example.com\"})."
             exit 1
           fi
           
