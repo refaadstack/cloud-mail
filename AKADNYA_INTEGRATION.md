@@ -56,3 +56,23 @@ MAIL_PORT=587
 The cloud-mail worker receives inbound mail only. Outbound can be handled
 by the worker's built-in `send_email` binding or kept via Laravel's
 existing Brevo SMTP.
+
+## Per-domain admin (2026-09-15)
+
+`admin@akadnya.com` is a domain admin for `akadnya.com` only; `admin@refaadstack.com`
+remains global superadmin.
+
+- `mail-worker/wrangler.toml` `[vars]`: `admins = '{"akadnya.com":"admin@akadnya.com"}'`
+- Helper: `mail-worker/src/utils/admin-utils.js` (`isAdmin`, `adminDomains`, `assertCanManage`)
+- `/user/list`, `/allEmail/list`, `/allEmail/latest` are scoped to the caller's
+  administered domain(s). Mutations (`setPwd`, `setStatus`, `add`, `resetSendCount`,
+  `restore`, `physicsDelete`) reject cross-domain targets with 403.
+- UI role `Akadnya Admin` (granted via `/role/add` by superadmin): perms
+  `email:delete/send`, `user:query/add/set-pwd/set-status/reset-send`,
+  `account:query/add`, `all-email:query`. Deliberately NO `role:*`, `setting:*`,
+  `user:delete`, `user:set-type`, `all-email:delete` — those stay superadmin-only.
+- Menus (`/all-users`, `/all-mail`) appear automatically via perm-driven routing;
+  no frontend rebuild needed for perm changes.
+- CI: `wrangler-action.toml` uses `admins = "${ADMINS}"`; the deploy workflow
+  requires repo variable/secret `ADMINS` (JSON object, default `'{}'`).
+  Push without it wipes the mapping on next CI deploy.
